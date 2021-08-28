@@ -4,7 +4,7 @@
 
     <application>
         <activity
-            android:name=".es.tumangaonline.TuMangaOnlineUrlActivity"
+            android:name=".es.tumangaonline2.TuMangaOnlineUrlActivity"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
