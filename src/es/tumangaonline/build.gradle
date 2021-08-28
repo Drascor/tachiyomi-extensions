@@ -2,9 +2,9 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
 ext {
-    extName = 'TuMangaOnline'
-    pkgNameSuffix = 'es.tumangaonline'
-    extClass = '.TuMangaOnline'
+    extName = 'TuMangaOnline2'
+    pkgNameSuffix = 'es.tumangaonline2'
+    extClass = '.TuMangaOnline2'
     extVersionCode = 35
     libVersion = '1.2'
 }
