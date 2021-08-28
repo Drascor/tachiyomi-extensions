@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.en.tapastic
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.webkit.CookieManager
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.network.GET
@@ -37,11 +38,70 @@ import java.util.Locale
 
 class Tapastic : ConfigurableSource, ParsedHttpSource() {
 
-    // Preferences
+    // Originally Tapastic
+    override val id = 3825434541981130345
+
+    override val name = "Tapas"
+
+    override val lang = "en"
+
+    override val baseUrl = "https://tapas.io"
+
+    override val supportsLatest = true
+
+    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
+
+    override val client: OkHttpClient = super.client.newBuilder()
+        .cookieJar(
+            // Syncs okhttp with webview cookies, allowing logged-in users do logged-in stuff
+            object : CookieJar {
+                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                    for (cookie in cookies) {
+                        webViewCookieManager.setCookie(url.toString(), cookie.toString())
+                    }
+                }
+                override fun loadForRequest(url: HttpUrl): MutableList<Cookie> {
+                    val cookiesString = webViewCookieManager.getCookie(url.toString())
+
+                    if (cookiesString != null && cookiesString.isNotEmpty()) {
+                        val cookieHeaders = cookiesString.split("; ").toList()
+                        val cookies = mutableListOf<Cookie>()
+                        for (header in cookieHeaders) {
+                            cookies.add(Cookie.parse(url, header)!!)
+                        }
+                        // Adds age verification cookies to access mature comics
+                        return cookies.apply {
+                            add(
+                                Cookie.Builder()
+                                    .domain("tapas.io")
+                                    .path("/")
+                                    .name("birthDate")
+                                    .value("1994-01-01")
+                                    .build()
+                            )
+                            add(
+                                Cookie.Builder()
+                                    .domain("tapas.io")
+                                    .path("/")
+                                    .name("adjustedBirthDate")
+                                    .value("1994-01-01")
+                                    .build()
+                            )
+                        }
+                    } else {
+                        return mutableListOf()
+                    }
+                }
+            }
+        )
+        .build()
 
     private val preferences: SharedPreferences by lazy {
         Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
+
+    override fun headersBuilder(): Headers.Builder = Headers.Builder()
+        .add("Referer", "https://m.tapas.io")
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val chapterVisibilityPref = SwitchPreferenceCompat(screen.context).apply {
@@ -73,49 +133,6 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
 
     private fun showLockedChapterPref() = preferences.getBoolean(CHAPTER_VIS_PREF_KEY, false)
     private fun showLockPref() = preferences.getBoolean(SHOW_LOCK_PREF_KEY, false)
-
-    companion object {
-        private const val CHAPTER_VIS_PREF_KEY = "lockedChapterVisibility"
-        private const val SHOW_LOCK_PREF_KEY = "showChapterLock"
-    }
-
-    // Info
-    override val lang = "en"
-    override val supportsLatest = true
-    override val name = "Tapas" // originally Tapastic
-    override val baseUrl = "https://tapas.io"
-    override val id = 3825434541981130345
-
-    override val client: OkHttpClient = super.client.newBuilder()
-        .cookieJar(
-            object : CookieJar {
-                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {}
-                override fun loadForRequest(url: HttpUrl): MutableList<Cookie> {
-                    return ArrayList<Cookie>().apply {
-                        add(
-                            Cookie.Builder()
-                                .domain("tapas.io")
-                                .path("/")
-                                .name("birthDate")
-                                .value("1994-01-01")
-                                .build()
-                        )
-                        add(
-                            Cookie.Builder()
-                                .domain("tapas.io")
-                                .path("/")
-                                .name("adjustedBirthDate")
-                                .value("1994-01-01")
-                                .build()
-                        )
-                    }
-                }
-            }
-        )
-        .build()
-
-    override fun headersBuilder(): Headers.Builder = Headers.Builder()
-        .add("Referer", "https://m.tapas.io")
 
     // Popular
 
@@ -168,6 +185,11 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
                         it.addToUri(url)
                 }
             }
+        }
+        // Append sort if category = ALL
+        if (url.toString().contains("b=ALL")) {
+            val sortFilter = filterList.find { it is SortFilter } as SortFilter
+            sortFilter.addToUri(url)
         }
         // Append page number
         url.addQueryParameter("pageNumber", page.toString())
@@ -272,18 +294,17 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         // Tapastic does not support genre filtering and text search at the same time
         Filter.Header("NOTE: All filters ignored if using text search!"),
         Filter.Separator(),
+        Filter.Header("Sort: Only applied when category is All"),
+        SortFilter(),
+        Filter.Separator(),
         CategoryFilter(),
         GenreFilter(),
         StatusFilter(),
-        Filter.Header("Sort is ignored when category filter is active!"),
-        SortFilter(),
         Filter.Separator(),
         Filter.Header("Mature filters"),
         MatureFilter("Show Mature Results Only"),
         MatureCategoryFilter(),
-        MatureGenreFilter(),
-        Filter.Header("Sort is ignored when category filter is active!"),
-        MatureSortFilter(),
+        MatureGenreFilter()
     )
 
     private class CategoryFilter : UriSelectFilter(
@@ -298,7 +319,6 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
             Pair("BINGE", "Binge"),
             Pair("ORIGINAL", "Tapas Originals")
         ),
-        firstIsUnspecified = false,
         defaultValue = 1
     )
 
@@ -335,17 +355,6 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         )
     )
 
-    private class SortFilter : UriSelectFilter(
-        "Sort",
-        false,
-        "s",
-        arrayOf(
-            Pair("DATE", "Date"),
-            Pair("LIKE", "Likes"),
-            Pair("SUBSCRIBE", "Subscribers")
-        )
-    )
-
     private class MatureFilter(name: String) : Filter.CheckBox(name)
 
     private class MatureCategoryFilter : UriSelectFilter(
@@ -357,13 +366,12 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
             Pair("POPULAR", "Popular"),
             Pair("FRESH", "Fresh"),
         ),
-        firstIsUnspecified = false,
         defaultValue = 1
     )
 
     private class MatureGenreFilter : UriSelectFilter(
         "Genre",
-        false,
+        true,
         "g",
         arrayOf(
             Pair("0", "Any"),
@@ -376,16 +384,19 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         )
     )
 
-    private class MatureSortFilter : UriSelectFilter(
-        "Sort",
-        true,
-        "s",
-        arrayOf(
+    private class SortFilter(
+        name: String = "Sort by",
+        var vals: Array<Pair<String, String>> = arrayOf(
             Pair("DATE", "Date"),
             Pair("LIKE", "Likes"),
             Pair("SUBSCRIBE", "Subscribers")
-        )
-    )
+        ),
+        defaultValue: Int = 0
+    ) : Filter.Select<String>(name, vals.map { it.second }.toTypedArray(), defaultValue) {
+        fun addToUri(uri: HttpUrl.Builder) {
+            uri.addQueryParameter("s", vals[state].first)
+        }
+    }
 
     /**
      * Class that creates a select filter. Each entry in the dropdown has a name and a display name.
@@ -398,7 +409,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         override val isMature: Boolean,
         val uriParam: String,
         val vals: Array<Pair<String, String>>,
-        val firstIsUnspecified: Boolean = true,
+        val firstIsUnspecified: Boolean = false,
         defaultValue: Int = 0
     ) :
         Filter.Select<String>(displayName, vals.map { it.second }.toTypedArray(), defaultValue),
@@ -415,5 +426,10 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
     private interface UriFilter {
         val isMature: Boolean
         fun addToUri(uri: HttpUrl.Builder)
+    }
+
+    companion object {
+        private const val CHAPTER_VIS_PREF_KEY = "lockedChapterVisibility"
+        private const val SHOW_LOCK_PREF_KEY = "showChapterLock"
     }
 }
